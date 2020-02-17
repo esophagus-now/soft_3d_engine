@@ -8,6 +8,8 @@
 #include <SDL.h>
 #include <unistd.h>
 
+#define BUFFER_SPACE 16
+
 #define DEBUG 0
 
 #if (DEBUG == 1)
@@ -69,7 +71,6 @@ struct vec {
 	}	
 };
 
-
 vec operator* (float f, vec const& v) {
 	return v*f;
 }
@@ -77,39 +78,9 @@ vec operator* (float f, vec const& v) {
 typedef unsigned char byte;
 
 #pragma pack(1)
-struct bmp_pixel {
-	byte b, g, r;
-};
-
-#pragma pack(1)
 struct sdl_pixel {
 	byte b, g, r;
 	byte unused;
-};
-
-#pragma pack(1)
-struct bmp {
-	//Header
-	char     sig[2];			//Signature
-	unsigned f_sz;				//File size in bytes
-	unsigned unused;			//Unused
-	unsigned data_off;			//Offset of data from start of file
-	
-	//Info header
-	unsigned info_sz;			//Size of info header
-	unsigned width;				//Width of image (in pixels)
-	unsigned height;				//Height of image (in pixels)
-	unsigned short planes;		//Number of planes? Just set this to 1?
-	unsigned short bpp;			//Bits per pixel
-	unsigned cmp;				//Type of compression. 0 for none
-	unsigned img_sz;			//Valid to set to 0 if no compression
-	unsigned x_px_per_m;		//Horizontal resolution (px/meter)
-	unsigned y_px_per_m;		//Vertical resolution (px/meter)
-	unsigned cols_used;			//Number of colours actually used
-	unsigned imp_cols;			//Number of important colours (0 = all)
-	
-	//After this is an optional colormap if you use less than 16 bpp. I 
-	//don't use it
 };
 
 #define WIDTH 400
@@ -151,20 +122,107 @@ ostream& operator<< (ostream &o, vert_shaded const& v) {
 	return o << "<" << v.x << "," << v.y << ">" << el;
 }
 
-
 struct segment {
-	int x1, x2;
+	short xl, xr;
+	float zl_inv, zr_inv; //Could make these ints. We know the range of the 
+	//view frustum, so we just need a fairly precise (and monotonically 
+	//increasing) float->int mapping
 	tri const *t; //Gives us access to gradients
+	
+	int sect(segment const& other) {
+		return 0;
+	}
+	
 };
+
+void print_overlap_info(segment const& a, segment const& b) {
+	float a_dx = (float) a.xr - (float) a.xl;
+	float a_dz = a.zr_inv - a.zl_inv;
+	
+	//No need to worry about machine epsilon here
+	if (a_dx == 0.0) {
+		cout << "Existing segment is only one pixel. Requires special case" << el;
+		//Left and right must have same z coordinate or else tis doesn't make sense
+		return;
+	}
+	
+	float zl_inv_xformed, zr_inv_xformed;
+	if (fabsf(a_dz) < 1e-7) {
+		cout << "No matrix transformation required, but still need to shift" << el;
+		zl_inv_xformed = b.zl_inv - a.zl_inv;
+		zr_inv_xformed = b.zr_inv - a.zr_inv;
+	} else {
+		cout << "Safe to perform transform" << el;
+		float M22 = -a_dx/a_dz;
+		
+		float xl_shifted = (float) (b.xl - a.xl);
+		float xr_shifted = (float) (b.xr - a.xr);
+		float zl_inv_shifted = b.zl_inv - a.zl_inv;
+		float zr_inv_shifted = b.zr_inv - a.zr_inv;
+		zl_inv_xformed = xl_shifted + M22*zl_inv_shifted;
+		zr_inv_xformed = xr_shifted + M22*zr_inv_shifted;
+	}
+	
+	bool l_behind = (zl_inv_xformed < 0);
+	bool r_behind = (zr_inv_xformed < 0);
+	
+	cout << "Left point is " << (l_behind  ? "behind" : "in front") << el;
+	cout << "Right point is " << (r_behind ? "behind" : "in front") << el;
+	
+	if (l_behind) {
+		if (r_behind) {
+			if (b.xl < a.xl) {
+				cout << "Insert red line chopped from " << b.xl << " to " << a.xl - 1 << el;
+			}
+			cout << "Insert entire black line (from " << a.xl << " to " << a.xr << ")" << el;
+			if (b.xr > a.xr) {
+				cout << "Insert red line chopped from" << a.xr+1 << " to " << b.xr << el;
+			}
+		} else {
+			cout << "Not implemented!" << el;
+		}
+	} else {
+		if (r_behind) {
+			cout << "Not implemented!" << el;
+		} else {
+			if (a.xl < b.xl) {
+				cout << "Insert black line chopped from " << a.xl << " to " << b.xl - 1 << el;
+			}
+			cout << "Insert entire red line (from " << b.xl << " to " << b.xr << ")" << el;
+			if (a.xr > b.xr) {
+				cout << "Insert black line chopped from" << b.xr+1 << " to " << a.xr << el;
+			}
+		}
+	}
+	
+}
 
 template <int N_SCANLINES>
 struct sbuffer {
 	vector<segment> scanlines[N_SCANLINES];
 	
-	
+	void insert(segment const& s, int y) {
+		vector<segment> const& orig = scanlines[y];
+		vector<segment> repl; //Replacement scanline
+		repl.reserve(orig.size() + 16); //Should prevent reallocations as we work
+		
+		//Immediately copy all segments to the left of the "contested area"
+		unsigned i;
+		for (i = 0; orig[i].xr < s.xl; i++) {
+			repl.push_back(orig[i]);
+		}
+		
+		//... do middle section ...
+		
+		//Finally, copy in everything to the rigtht of the "contested area"
+		for (; i < orig.size(); i++) {
+			repl.push_back(orig[i]);
+		}
+	}
 };
 
-void scanEdge(int x0, int y0, int x1, int y1, int lr, int skip_first, vector<int> &out) {
+//Better to pre-allocate and then use array subscripting
+void scan_edge(int x0, int y0, int x1, int y1, int lr, int skip_first, vector<int> &out) {
 	int dx, sx;
 	int dy, sy;
 	
@@ -228,7 +286,9 @@ void scanEdge(int x0, int y0, int x1, int y1, int lr, int skip_first, vector<int
 	}
 }
 
-void scanTri(vector<int> &lefts, vector<int> &rights, int& top_y, vert_shaded const *V, tri const& t, int verbose = 0) {
+//Better to pre-allocate and then use array subscripting
+//Try limiting calls to scan_edge
+void scan_tri(vector<int> &lefts, vector<int> &rights, int& top_y, vert_shaded const *V, tri const& t, int verbose = 0) {
 	vert_shaded const& v1 = V[t.ind[0]];
 	vert_shaded const& v2 = V[t.ind[1]];
 	vert_shaded const& v3 = V[t.ind[2]];
@@ -257,9 +317,9 @@ void scanTri(vector<int> &lefts, vector<int> &rights, int& top_y, vert_shaded co
 			//C top, A bottom
 			if (verbose) cout << "Case 1" << el;
 			top_y = v3.y + 1;
-			scanEdge(v3.x, v3.y, v2.x, v2.y, 1, 1, lefts);
-			scanEdge(v2.x, v2.y, v1.x, v1.y, 1, 0, lefts);
-			scanEdge(v3.x, v3.y, v1.x, v1.y, 0, 1, rights);
+			scan_edge(v3.x, v3.y, v2.x, v2.y, 1, 1, lefts);
+			scan_edge(v2.x, v2.y, v1.x, v1.y, 1, 0, lefts);
+			scan_edge(v3.x, v3.y, v1.x, v1.y, 0, 1, rights);
 		} else if (c < a) {
 			//b < a, b<= c, c < a
 			//b <= c < a
@@ -267,18 +327,18 @@ void scanTri(vector<int> &lefts, vector<int> &rights, int& top_y, vert_shaded co
 			if (verbose) cout << "Case 2" << el;
 			int top_is_pointy = (v2.y != v3.y);
 			top_y = v2.y + top_is_pointy;
-			scanEdge(v2.x, v2.y, v1.x, v1.y, 1, top_is_pointy, lefts);
-			scanEdge(v2.x, v2.y, v3.x, v3.y, 0, top_is_pointy, rights);
-			scanEdge(v3.x, v3.y, v1.x, v1.y, 0, 0, rights);
+			scan_edge(v2.x, v2.y, v1.x, v1.y, 1, top_is_pointy, lefts);
+			scan_edge(v2.x, v2.y, v3.x, v3.y, 0, top_is_pointy, rights);
+			scan_edge(v3.x, v3.y, v1.x, v1.y, 0, 0, rights);
 		} else {
 			//b < a, b <= c, a <= c
 			//b < a <= c
 			//B top, A bottom
 			if (verbose) cout << "Case 3" << el;
 			top_y = v2.y + 1;
-			scanEdge(v2.x, v2.y, v1.x, v1.y, 1, 1, lefts);
-			scanEdge(v1.x, v1.y, v3.x, v3.y, 1, 0, lefts);
-			scanEdge(v2.x, v2.y, v3.x, v3.y, 0, 1, rights);
+			scan_edge(v2.x, v2.y, v1.x, v1.y, 1, 1, lefts);
+			scan_edge(v1.x, v1.y, v3.x, v3.y, 1, 0, lefts);
+			scan_edge(v2.x, v2.y, v3.x, v3.y, 0, 1, rights);
 		}
 	} else {
 		if (c < a) {
@@ -287,9 +347,9 @@ void scanTri(vector<int> &lefts, vector<int> &rights, int& top_y, vert_shaded co
 			//C top, B bottom
 			if (verbose) cout << "Case 4" << el;
 			top_y = v3.y + 1;
-			scanEdge(v3.x, v3.y, v2.x, v2.y, 1, 1, lefts);
-			scanEdge(v3.x, v3.y, v1.x, v1.y, 0, 1, rights);
-			scanEdge(v1.x, v1.y, v2.x, v2.y, 0, 0, rights);
+			scan_edge(v3.x, v3.y, v2.x, v2.y, 1, 1, lefts);
+			scan_edge(v3.x, v3.y, v1.x, v1.y, 0, 1, rights);
+			scan_edge(v1.x, v1.y, v2.x, v2.y, 0, 0, rights);
 		} else if (c < b) {
 			//a <= b, a <= c, c < b
 			//a <= c < b
@@ -297,9 +357,9 @@ void scanTri(vector<int> &lefts, vector<int> &rights, int& top_y, vert_shaded co
 			if (verbose) cout << "Case 5" << el;
 			int top_is_pointy = (v3.y != v1.y);
 			top_y = v1.y + top_is_pointy;
-			scanEdge(v1.x, v1.y, v3.x, v3.y, 1, top_is_pointy, lefts);
-			scanEdge(v3.x, v3.y, v2.x, v2.y, 1, 0, lefts);
-			scanEdge(v1.x, v1.y, v2.x, v2.y, 0, top_is_pointy, rights);
+			scan_edge(v1.x, v1.y, v3.x, v3.y, 1, top_is_pointy, lefts);
+			scan_edge(v3.x, v3.y, v2.x, v2.y, 1, 0, lefts);
+			scan_edge(v1.x, v1.y, v2.x, v2.y, 0, top_is_pointy, rights);
 		} else {
 			//a <= b, a <= c, b <= c
 			//a <= b <= c
@@ -307,9 +367,9 @@ void scanTri(vector<int> &lefts, vector<int> &rights, int& top_y, vert_shaded co
 			if (verbose) cout << "Case 6" << el;
 			int top_is_pointy = (v2.y != v1.y);
 			top_y = v1.y + top_is_pointy;
-			scanEdge(v1.x, v1.y, v3.x, v3.y, 1, top_is_pointy, lefts);
-			scanEdge(v1.x, v1.y, v2.x, v2.y, 0, top_is_pointy, rights);
-			scanEdge(v2.x, v2.y, v3.x, v3.y, 0, 0, rights);
+			scan_edge(v1.x, v1.y, v3.x, v3.y, 1, top_is_pointy, lefts);
+			scan_edge(v1.x, v1.y, v2.x, v2.y, 0, top_is_pointy, rights);
+			scan_edge(v2.x, v2.y, v3.x, v3.y, 0, 0, rights);
 		}
 	}
 	
@@ -382,7 +442,7 @@ int main(int argc, char **argv) {
 			//Draw triangle!!
 			vector<int> lefts, rights;
 			int top_y;
-			scanTri(lefts, rights, top_y, testverts, *draw_first);
+			scan_tri(lefts, rights, top_y, testverts, *draw_first);
 			
 			for (int i = 0, y = top_y; i < int(lefts.size()); i++, y++) {
 				sdl_pixel *line = (sdl_pixel *) ((char*)(surf->pixels) + y*surf->pitch);
@@ -394,7 +454,7 @@ int main(int argc, char **argv) {
 			}
 			
 			lefts.clear(); rights.clear();
-			scanTri(lefts, rights, top_y, testverts, *draw_second);
+			scan_tri(lefts, rights, top_y, testverts, *draw_second);
 			
 			for (int i = 0, y = top_y; i < int(lefts.size()); i++, y++) {
 				sdl_pixel *line = (sdl_pixel *) ((char*)(surf->pixels) + y*surf->pitch);
@@ -448,13 +508,13 @@ int main(int argc, char **argv) {
 					cout << vector<vert_shaded>(testverts, testverts + 4) << el;
 					vector<int> lefts, rights;
 					int top_y;
-					scanTri(lefts, rights, top_y, testverts, t1, 1);
+					scan_tri(lefts, rights, top_y, testverts, t1, 1);
 					cout << "Black triangle lefts: " << lefts << el;
 					cout << "Black triangle rights: " << rights << el;
 					cout << "Black triangle top_y: " << top_y << el;
 					lefts.clear();
 					rights.clear();
-					scanTri(lefts, rights, top_y, testverts, t2, 1);
+					scan_tri(lefts, rights, top_y, testverts, t2, 1);
 					cout << "Red triangle lefts: " << lefts << el;
 					cout << "Red triangle rights: " << rights << el;
 					cout << "Red triangle top_y: " << top_y << el;
@@ -479,6 +539,18 @@ int main(int argc, char **argv) {
 	}
 	
 	SDL_DestroyWindow(win);
+	
+	segment s1 = {
+		3, 18,
+		0.5, 0.25
+	};
+	
+	segment s2 = {
+		14, 29,
+		0.25, 0.5
+	};
+	
+	print_overlap_info(s1, s2);
 	
 	return 0;
 }
