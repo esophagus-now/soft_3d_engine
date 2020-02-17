@@ -8,7 +8,7 @@
 #include <SDL.h>
 #include <unistd.h>
 
-#define DEBUG 1
+#define DEBUG 0
 
 #if (DEBUG == 1)
 #define DBG_PRINT(x) cout << #x " = " << x << el
@@ -32,7 +32,7 @@ ostream& operator<<(ostream &o, vector<T> const& v) {
 		o << delim << i;
 		delim = ", ";
 	}
-	return o << "]";
+	return o << "(" << v.size() << ")]";
 }
 
 struct vec {
@@ -147,6 +147,11 @@ struct tri {
 	float gz_inv_x, gz_inv_y; //Gradient of z^-1
 };
 
+ostream& operator<< (ostream &o, vert_shaded const& v) {
+	return o << "<" << v.x << "," << v.y << ">" << el;
+}
+
+
 struct segment {
 	int x1, x2;
 	tri const *t; //Gives us access to gradients
@@ -223,7 +228,7 @@ void scanEdge(int x0, int y0, int x1, int y1, int lr, int skip_first, vector<int
 	}
 }
 
-void scanTri(vector<int> &lefts, vector<int> &rights, int& top_y, vert_shaded const *V, tri const& t) {
+void scanTri(vector<int> &lefts, vector<int> &rights, int& top_y, vert_shaded const *V, tri const& t, int verbose = 0) {
 	vert_shaded const& v1 = V[t.ind[0]];
 	vert_shaded const& v2 = V[t.ind[1]];
 	vert_shaded const& v3 = V[t.ind[2]];
@@ -250,18 +255,18 @@ void scanTri(vector<int> &lefts, vector<int> &rights, int& top_y, vert_shaded co
 		if (c < b) {
 			//c < b <a
 			//C top, A bottom
-			DBG_PUTS("Case 1");
-			top_y = v3.y;
-			scanEdge(v3.x, v3.y, v2.x, v2.y, 1, 0, lefts);
+			if (verbose) cout << "Case 1" << el;
+			top_y = v3.y + 1;
+			scanEdge(v3.x, v3.y, v2.x, v2.y, 1, 1, lefts);
 			scanEdge(v2.x, v2.y, v1.x, v1.y, 1, 0, lefts);
-			scanEdge(v3.x, v3.y, v1.x, v1.y, 0, 0, rights);
+			scanEdge(v3.x, v3.y, v1.x, v1.y, 0, 1, rights);
 		} else if (c < a) {
 			//b < a, b<= c, c < a
 			//b <= c < a
 			//B top, A bottom, check pointiness
-			DBG_PUTS("Case 2");
-			top_y = v2.y;
-			int top_is_pointy = (v2.y == v3.y);
+			if (verbose) cout << "Case 2" << el;
+			int top_is_pointy = (v2.y != v3.y);
+			top_y = v2.y + top_is_pointy;
 			scanEdge(v2.x, v2.y, v1.x, v1.y, 1, top_is_pointy, lefts);
 			scanEdge(v2.x, v2.y, v3.x, v3.y, 0, top_is_pointy, rights);
 			scanEdge(v3.x, v3.y, v1.x, v1.y, 0, 0, rights);
@@ -269,29 +274,29 @@ void scanTri(vector<int> &lefts, vector<int> &rights, int& top_y, vert_shaded co
 			//b < a, b <= c, a <= c
 			//b < a <= c
 			//B top, A bottom
-			DBG_PUTS("Case 3");
-			top_y = v2.y;
-			scanEdge(v2.x, v2.y, v1.x, v1.y, 1, 0, lefts);
+			if (verbose) cout << "Case 3" << el;
+			top_y = v2.y + 1;
+			scanEdge(v2.x, v2.y, v1.x, v1.y, 1, 1, lefts);
 			scanEdge(v1.x, v1.y, v3.x, v3.y, 1, 0, lefts);
-			scanEdge(v2.x, v2.y, v3.x, v3.y, 0, 0, rights);
+			scanEdge(v2.x, v2.y, v3.x, v3.y, 0, 1, rights);
 		}
 	} else {
 		if (c < a) {
 			//a <= b, c < a
 			//c < a <= b
 			//C top, B bottom
-			DBG_PUTS("Case 4");
-			top_y = v3.y;
-			scanEdge(v3.x, v3.y, v2.x, v2.y, 1, 0, lefts);
-			scanEdge(v3.x, v3.y, v1.x, v1.y, 0, 0, rights);
-			scanEdge(v3.x, v3.y, v2.x, v2.y, 0, 0, rights);
+			if (verbose) cout << "Case 4" << el;
+			top_y = v3.y + 1;
+			scanEdge(v3.x, v3.y, v2.x, v2.y, 1, 1, lefts);
+			scanEdge(v3.x, v3.y, v1.x, v1.y, 0, 1, rights);
+			scanEdge(v1.x, v1.y, v2.x, v2.y, 0, 0, rights);
 		} else if (c < b) {
 			//a <= b, a <= c, c < b
 			//a <= c < b
 			//A top, B bottom, check pointiness
-			DBG_PUTS("Case 5");
-			top_y = v1.y;
-			int top_is_pointy = (v3.y == v1.y);
+			if (verbose) cout << "Case 5" << el;
+			int top_is_pointy = (v3.y != v1.y);
+			top_y = v1.y + top_is_pointy;
 			scanEdge(v1.x, v1.y, v3.x, v3.y, 1, top_is_pointy, lefts);
 			scanEdge(v3.x, v3.y, v2.x, v2.y, 1, 0, lefts);
 			scanEdge(v1.x, v1.y, v2.x, v2.y, 0, top_is_pointy, rights);
@@ -299,9 +304,9 @@ void scanTri(vector<int> &lefts, vector<int> &rights, int& top_y, vert_shaded co
 			//a <= b, a <= c, b <= c
 			//a <= b <= c
 			//A top, C bottom, check pointiness
-			DBG_PUTS("Case 6");
-			top_y = v1.y;
-			int top_is_pointy = /*(v2.y == v1.y)*/ 1;
+			if (verbose) cout << "Case 6" << el;
+			int top_is_pointy = (v2.y != v1.y);
+			top_y = v1.y + top_is_pointy;
 			scanEdge(v1.x, v1.y, v3.x, v3.y, 1, top_is_pointy, lefts);
 			scanEdge(v1.x, v1.y, v2.x, v2.y, 0, top_is_pointy, rights);
 			scanEdge(v2.x, v2.y, v3.x, v3.y, 0, 0, rights);
@@ -355,6 +360,7 @@ int main(int argc, char **argv) {
 	byte g = 200;
 	byte b = 200;
 	tri *draw_first = &t1, *draw_second = &t2;
+	int edit_index = 0;
 	while (1) {
 		unsigned thisTime = SDL_GetTicks();
 		unsigned delta = thisTime - lastTime;
@@ -363,7 +369,6 @@ int main(int argc, char **argv) {
 		accum_error += delta;
 		
 		if (accum_error > 33) {
-			DBG_PUTS("\nNEW FRAME");
 			//Fill the surface with a colour, later replace this with 3D drawing code
 			for (int i = 0; i < HEIGHT; i++) {
 				sdl_pixel *line = (sdl_pixel *) ((char*)(surf->pixels) + i*surf->pitch);
@@ -377,10 +382,6 @@ int main(int argc, char **argv) {
 			//Draw triangle!!
 			vector<int> lefts, rights;
 			int top_y;
-			#if (DEBUG == 1)
-			if (draw_first == &t1) DBG_PUTS("Drawing black triangle");
-			else DBG_PUTS("Drawing red triangle");
-			#endif
 			scanTri(lefts, rights, top_y, testverts, *draw_first);
 			
 			for (int i = 0, y = top_y; i < int(lefts.size()); i++, y++) {
@@ -393,10 +394,6 @@ int main(int argc, char **argv) {
 			}
 			
 			lefts.clear(); rights.clear();
-			#if (DEBUG == 1)
-			if (draw_second == &t1) DBG_PUTS("Drawing black triangle");
-			else DBG_PUTS("Drawing red triangle");
-			#endif
 			scanTri(lefts, rights, top_y, testverts, *draw_second);
 			
 			for (int i = 0, y = top_y; i < int(lefts.size()); i++, y++) {
@@ -433,17 +430,36 @@ int main(int argc, char **argv) {
 			} else if (e.type == SDL_KEYDOWN) {
 				switch (e.key.keysym.sym) {
 				case SDLK_UP:
-					if (testverts[0].y > 0) testverts[0].y--;
+					if (testverts[edit_index].y > 0) testverts[edit_index].y--;
 					break;
 				case SDLK_DOWN:
-					if (testverts[0].y < HEIGHT-1) testverts[0].y++;
+					if (testverts[edit_index].y < HEIGHT-1) testverts[edit_index].y++;
 					break;
 				case SDLK_LEFT:
-					if (testverts[0].x > 0) testverts[0].x--;
+					if (testverts[edit_index].x > 0) testverts[edit_index].x--;
 					break;
 				case SDLK_RIGHT:
-					if (testverts[0].x < WIDTH-1) testverts[0].x++;
+					if (testverts[edit_index].x < WIDTH-1) testverts[edit_index].x++;
 					break;
+				case SDLK_SPACE:
+					edit_index = (edit_index + 1) % 4;
+					break;
+				case SDLK_RETURN: {
+					cout << vector<vert_shaded>(testverts, testverts + 4) << el;
+					vector<int> lefts, rights;
+					int top_y;
+					scanTri(lefts, rights, top_y, testverts, t1, 1);
+					cout << "Black triangle lefts: " << lefts << el;
+					cout << "Black triangle rights: " << rights << el;
+					cout << "Black triangle top_y: " << top_y << el;
+					lefts.clear();
+					rights.clear();
+					scanTri(lefts, rights, top_y, testverts, t2, 1);
+					cout << "Red triangle lefts: " << lefts << el;
+					cout << "Red triangle rights: " << rights << el;
+					cout << "Red triangle top_y: " << top_y << el;
+					break;
+				}
 				}
 			}
 		}
