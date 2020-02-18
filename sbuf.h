@@ -1,9 +1,11 @@
 #ifndef SBUF_H
 #define SBUF_H 1
 
+#include <SDL.h>
 #include <iostream>
 #include "main.h"
 #include "3d_types.h"
+#include "poly_raster.h"
 
 struct segment {
 	short xl, xr;
@@ -67,7 +69,20 @@ template <int N_SCANLINES>
 struct sbuffer {
 	std::vector<segment> scanlines[N_SCANLINES];
 	
-	void insert(segment const& s, int y) {
+	void insert_segment(segment s, int y) {
+		
+		//Discard segments that are out of range
+		if (y < 0 || y >= N_SCANLINES) return;
+		if (s.xr < 0 || s.xl >= WIDTH) return;
+		
+		//Clip segment to screen
+		if (s.xl < 0) {
+			s = s.chop_left(0);
+		}
+		if (s.xr >= WIDTH) {
+			s = s.chop_right(WIDTH - 1);
+		}
+		
 		std::vector<segment> const& orig = scanlines[y];
 		std::vector<segment> repl; //Replacement scanline
 		repl.reserve(orig.size() + BUFFER_SPACE); //Should prevent reallocations as we work
@@ -99,6 +114,34 @@ struct sbuffer {
 		}
 		
 		scanlines[y] = std::move(repl);
+	}
+	
+	void insert_tri(tri const& t, vert_shaded const* v) {
+		std::vector<int> lefts, rights;
+		int y;
+		scan_tri(lefts, rights, y, v, t);
+		for (unsigned i = 0; i < lefts.size(); i++, y++) {
+			insert_segment({(short)lefts[i], (short)rights[i], 0.0, 0.0, &t}, y);
+		}
+	}
+	
+	//Assume N is equal to (or less than) the height of s
+	void draw(SDL_Surface *s) {
+		for (int i = 0; i < HEIGHT; i++) {
+			sdl_pixel *line = (sdl_pixel *) ((char*)(s->pixels) + i*s->pitch);
+			std::vector<segment> const& segs = scanlines[i];
+			for (auto const& seg : segs) {
+				for (int j = seg.xl; j <= seg.xr; j++) {
+					line[j].r = seg.t->r;
+					line[j].g = seg.t->g;
+					line[j].b = seg.t->b;
+				}
+			}
+		}
+	}
+	
+	void clear() {
+		for (auto &v : scanlines) v.clear();
 	}
 };
 

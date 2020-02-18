@@ -6,8 +6,10 @@
 
 #define BUFFER_SPACE 16
 
-#define WIDTH 400
-#define HEIGHT 400
+#define WIDTH 1900
+#define HEIGHT 1000
+
+#define FOV 1.5
 
 #define DEBUG 1
 
@@ -34,6 +36,12 @@ std::ostream& operator<<(std::ostream &o, std::vector<T> const& v) {
 }
 
 typedef unsigned char byte;
+
+#pragma pack(1)
+struct sdl_pixel {
+	byte b, g, r;
+	byte unused;
+};
 
 #endif
 

@@ -8,6 +8,7 @@
 #include <SDL.h>
 #include <unistd.h>
 #include "main.h"
+#include "3d_math.h"
 #include "3d_types.h"
 #include "poly_raster.h"
 #include "sbuf.h"
@@ -18,14 +19,56 @@ std::ostream& el(std::ostream &o) {
 	return o << "\n";
 }
 
-#pragma pack(1)
-struct sdl_pixel {
-	byte b, g, r;
-	byte unused;
+vert cube_verts[] = {
+	//Bottom
+	{{-1.0,  1.0, -3.0}}, //Back-left
+	{{ 1.0,  1.0, -3.0}}, //Back-right
+	{{-1.0, -1.0, -3.0}}, //Front-left
+	{{ 1.0, -1.0, -3.0}}, //Front-right
+				
+	//Top       
+	{{-1.0,  1.0, -1.0}}, //Back-left
+	{{ 1.0,  1.0, -1.0}}, //Back-right
+	{{-1.0, -1.0, -1.0}}, //Front-left
+	{{ 1.0, -1.0, -1.0}}  //Front-right
 };
 
-int main(int argc, char **argv) {	
-#if !DEBUG
+vert_shaded cube_shaded[sizeof(cube_verts)/sizeof(*cube_verts)];
+
+#define BBL 0
+#define BBR 1
+#define BFL 2
+#define BFR 3
+#define TBL 4
+#define TBR 5
+#define TFL 6
+#define TFR 7
+
+//TODO: Change tri to:
+//	int pos_ind[3]
+//	int norm_ind[3]
+tri cube[] = {
+	//Bottom
+	{{BBL,BFR,BFL}, 255, 0, 0},
+	{{BBL,BBR,BFR}, 255, 0, 0},
+	//Back
+	{{BBR,TBL,TBR}, 0, 255, 0},
+	{{BBR,BBL,TBL}, 0, 255, 0},
+	//Left
+	{{BFL,TBL,BBL}, 0, 0, 255},
+	{{BFL,TFL,TBL}, 0, 0, 255},
+	//Front
+	{{BFL,TFR,TFL}, 255,255,255},
+	{{BFL,BFR,TFR}, 255,255,255},
+	//Right
+	{{BFR,TBR,TFR}, 0, 200, 200},
+	{{BFR,BBR,TBR}, 0, 200, 200},
+	//Top
+	{{TFL,TBR,TBL}, 200, 0, 200},
+	{{TFL,TFR,TBR}, 200, 0, 200},
+};
+
+int main(int argc, char **argv) {
 	vert_shaded testverts[4];
 	testverts[0].x = 0; testverts[0].y = 40;
 	testverts[1].x = 20; testverts[1].y = 0;
@@ -33,7 +76,9 @@ int main(int argc, char **argv) {
 	testverts[3].x = 10; testverts[3].y = 80;
 	
 	tri t1; t1.ind[0] = 0; t1.ind[1] = 1; t1.ind[2] = 2;
+			t1.r = 0; t1.g = 0; t1.b = 0;
 	tri t2; t2.ind[0] = 0; t2.ind[1] = 2; t2.ind[2] = 3;
+			t2.r = 255; t2.g = 0; t2.b = 0;
 	
 	int rc;
 	rc = SDL_Init(SDL_INIT_VIDEO);
@@ -67,8 +112,18 @@ int main(int argc, char **argv) {
 	unsigned accum_error = 0;
 	byte g = 200;
 	byte b = 200;
-	tri *draw_first = &t1, *draw_second = &t2;
 	int edit_index = 0;
+	
+	xrot xr(0.0);
+	yrot yr(0.0);
+	scale scl(0.1, 0.1, 0.1);
+	
+	vector<xformable const*> mv;
+	mv.reserve(3);
+	mv.push_back(&xr);
+	mv.push_back(&yr);
+	mv.push_back(&scl);
+	
 	while (1) {
 		unsigned thisTime = SDL_GetTicks();
 		unsigned delta = thisTime - lastTime;
@@ -81,43 +136,36 @@ int main(int argc, char **argv) {
 			for (int i = 0; i < HEIGHT; i++) {
 				sdl_pixel *line = (sdl_pixel *) ((char*)(surf->pixels) + i*surf->pitch);
 				for (int j = 0; j < WIDTH; j++) {
-					line[j].r = (255 * fnum) / 30;
-					line[j].g = g;
-					line[j].b = b;
+					line[j].r = 0;
+					line[j].g = 0;
+					line[j].b = 0;
 				}
 			}
 			
-			//Draw triangle!!
-			vector<int> lefts, rights;
-			int top_y;
-			scan_tri(lefts, rights, top_y, testverts, *draw_first);
+			shade_vert_arr(cube_shaded, cube_verts, get_xform(mv), sizeof(cube_verts)/sizeof(*cube_verts));
 			
-			for (int i = 0, y = top_y; i < int(lefts.size()); i++, y++) {
-				sdl_pixel *line = (sdl_pixel *) ((char*)(surf->pixels) + y*surf->pitch);
-				for (int x = lefts[i]; x <= rights[i]; x++) {
-					line[x].r = (draw_first == &t2)*255;
-					line[x].g = 0;
-					line[x].b = 0;
-				}
+			//Draw triangles!!
+			sbuffer<HEIGHT> s;
+			for (auto const& t: cube) {
+				s.insert_tri(t, cube_shaded);
 			}
 			
-			lefts.clear(); rights.clear();
-			scan_tri(lefts, rights, top_y, testverts, *draw_second);
-			
-			for (int i = 0, y = top_y; i < int(lefts.size()); i++, y++) {
-				sdl_pixel *line = (sdl_pixel *) ((char*)(surf->pixels) + y*surf->pitch);
-				for (int x = lefts[i]; x <= rights[i]; x++) {
-					line[x].r = (draw_second == &t2)*255;
-					line[x].g = 0;
-					line[x].b = 0;
-				}
-			}
-			swap(draw_first, draw_second);
+			s.draw(surf);
 			SDL_UpdateWindowSurface(win);
 			
 			unsigned numFrames = accum_error/33;
 			accum_error %= 33;
 			fnum = (fnum + numFrames) % 33;
+			
+			float ang = xr.get_deg();
+			ang += (float) numFrames;
+			if (ang > 360.0) ang -= 360.0;
+			xr.set_deg(ang);
+			
+			ang = yr.get_deg();
+			ang +=  1.5 *(float) numFrames;
+			if (ang > 360.0) ang -= 360.0;
+			yr.set_deg(ang);
 			
 			if (numFrames > 1) {
 				cout << "Frame dropped" << el;
@@ -186,42 +234,9 @@ int main(int argc, char **argv) {
 		}
 	}
 	
-	SDL_DestroyWindow(win);
-#endif
-
-	segment s1 = {
-		3, 18,
-		0.5, 0.25
-	};
+	SDL_DestroyWindow(win);	
 	
-	segment s2 = {
-		14, 29,
-		0.5, 0.25
-	};
-	
-	segment s3 = {
-		8, 23,
-		0.5, 0.25
-	};
-	
-	sbuffer<20> s;
-	
-	s.insert(s1, 10);
-	cout << s << el;
-	s.insert(s2, 10);
-	cout << s << el;
-	
-	s.insert(s2, 11);
-	cout << s << el;
-	s.insert(s3, 11);
-	cout << s << el;
-	
-	s.insert(s1, 12);
-	cout << s << el;
-	s.insert(s3, 12);
-	cout << s << el;
-	s.insert(s2, 12);
-	cout << s << el;
+	xform x;
 	
 	return 0;
 }
