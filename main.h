@@ -9,7 +9,7 @@
 #define WIDTH 1900
 #define HEIGHT 1000
 
-#define FOV 1.5
+#define FOV 2.0
 
 #define DEBUG 1
 

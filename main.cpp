@@ -216,6 +216,13 @@ int main(int argc, char **argv) {
 					cout << "Red triangle top_y: " << top_y << el;
 					break;
 				}
+				case SDLK_ESCAPE: {
+					SDL_Event ce;
+					ce.type = SDL_WINDOWEVENT;
+					ce.window.event = SDL_WINDOWEVENT_CLOSE;
+					SDL_PushEvent(&ce);
+					break;
+				}
 				}
 			}
 		}
