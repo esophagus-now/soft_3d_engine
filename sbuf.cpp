@@ -79,6 +79,12 @@ segment add_visible_segs(segment const& blk, segment const& red, float red_gradz
 				//Insert black line chopped from blk.xl to (red.xl-1)
 				r.push_back(blk.chop_right(red.xl-1, blk_gradz));
 			}
+			if (blk.xr > red.xr) {
+				//Special case: the red segment is fully inserted 
+				r.push_back(red);
+				//Insert black line chopped from (red.xr+1) to blk.xr
+				r.push_back(blk.chop_left(red.xr+1, blk_gradz));
+			}
 			//Return what is left of the red segment
 			return red;
 		}

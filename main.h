@@ -9,6 +9,8 @@
 #define WIDTH 1900
 #define HEIGHT 1000
 
+#define PERIOD_MS 17
+
 #define FOV 2.0
 
 #define DEBUG 1

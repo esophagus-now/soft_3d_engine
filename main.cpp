@@ -70,15 +70,13 @@ tri cube[] = {
 
 int main(int argc, char **argv) {
 	vert_shaded testverts[4];
-	testverts[0].x = 0; testverts[0].y = 40;
-	testverts[1].x = 20; testverts[1].y = 0;
-	testverts[2].x = 30; testverts[2].y = 30;
+	testverts[0].x = 603; testverts[0].y = 398; testverts[0].z_inv = 0;
+	testverts[1].x = 808; testverts[1].y = 617; testverts[1].z_inv = 0;
+	testverts[2].x = 596; testverts[2].y = 609; testverts[2].z_inv = 0;
 	testverts[3].x = 10; testverts[3].y = 80;
 	
 	tri t1; t1.ind[0] = 0; t1.ind[1] = 1; t1.ind[2] = 2;
-			t1.r = 0; t1.g = 0; t1.b = 0;
-	tri t2; t2.ind[0] = 0; t2.ind[1] = 2; t2.ind[2] = 3;
-			t2.r = 255; t2.g = 0; t2.b = 0;
+	t1.r = 255; t1.g = 255; t1.b = 20;
 	
 	int rc;
 	rc = SDL_Init(SDL_INIT_VIDEO);
@@ -100,7 +98,6 @@ int main(int argc, char **argv) {
 		exit(-1);
 	}
 	
-	int fnum = 0;
 	auto surf = SDL_GetWindowSurface(win);
 	if (!surf) {
 		cout << "Could not create SDL Window Surface: " << SDL_GetError() << el;
@@ -110,8 +107,6 @@ int main(int argc, char **argv) {
 	
 	unsigned lastTime = SDL_GetTicks();
 	unsigned accum_error = 0;
-	byte g = 200;
-	byte b = 200;
 	int edit_index = 0;
 	
 	xrot xr(0.0);
@@ -131,7 +126,7 @@ int main(int argc, char **argv) {
 		
 		accum_error += delta;
 		
-		if (accum_error > 33) {
+		if (accum_error > PERIOD_MS) {
 			//Fill the surface with a colour, later replace this with 3D drawing code
 			for (int i = 0; i < HEIGHT; i++) {
 				sdl_pixel *line = (sdl_pixel *) ((char*)(surf->pixels) + i*surf->pitch);
@@ -150,12 +145,13 @@ int main(int argc, char **argv) {
 				s.insert_tri(t, cube_shaded);
 			}
 			
+			//s.insert_tri(t1, testverts);
+			
 			s.draw(surf);
 			SDL_UpdateWindowSurface(win);
 			
-			unsigned numFrames = accum_error/33;
-			accum_error %= 33;
-			fnum = (fnum + numFrames) % 33;
+			unsigned numFrames = accum_error/PERIOD_MS;
+			accum_error %= PERIOD_MS;
 			
 			float ang = xr.get_deg();
 			ang += (float) numFrames;
@@ -197,23 +193,22 @@ int main(int argc, char **argv) {
 				case SDLK_RIGHT:
 					if (testverts[edit_index].x < WIDTH-1) testverts[edit_index].x++;
 					break;
-				case SDLK_SPACE:
+				case SDLK_SPACE: {
+					//float ang = xr.get_deg();
+					//ang += 1.0;
+					//if (ang > 360.0) ang -= 360.0;
+					//xr.set_deg(ang);
+					//
+					//ang = yr.get_deg();
+					//ang +=  1.5;
+					//if (ang > 360.0) ang -= 360.0;
+					//yr.set_deg(ang);
+					
 					edit_index = (edit_index + 1) % 4;
 					break;
+				}
 				case SDLK_RETURN: {
-					cout << vector<vert_shaded>(testverts, testverts + 4) << el;
-					vector<int> lefts, rights;
-					int top_y;
-					scan_tri(lefts, rights, top_y, testverts, t1, 1);
-					cout << "Black triangle lefts: " << lefts << el;
-					cout << "Black triangle rights: " << rights << el;
-					cout << "Black triangle top_y: " << top_y << el;
-					lefts.clear();
-					rights.clear();
-					scan_tri(lefts, rights, top_y, testverts, t2, 1);
-					cout << "Red triangle lefts: " << lefts << el;
-					cout << "Red triangle rights: " << rights << el;
-					cout << "Red triangle top_y: " << top_y << el;
+					cout << vector<vert_shaded>(begin(cube_shaded), end(cube_shaded)) << el;
 					break;
 				}
 				case SDLK_ESCAPE: {
@@ -235,8 +230,8 @@ int main(int argc, char **argv) {
 		accum_error += delta;
 		
 		//A little backwards, but whatever
-		if (accum_error < 33) {
-			if (SDL_WaitEventTimeout(&e, 33 - accum_error))
+		if (accum_error < PERIOD_MS) {
+			if (SDL_WaitEventTimeout(&e, PERIOD_MS - accum_error))
 				SDL_PushEvent(&e);
 		}
 	}
